@@ -68,7 +68,6 @@ namespace Game1
     }
 
     //migrating pointmass class to array structs in static pool instance
-
     public static class PM_ArrayPool
     {
         public static int size = 4096;
@@ -83,6 +82,20 @@ namespace Game1
         public static int[] neighbor_right = new int[size];
         public static int[] neighbor_down = new int[size];
         public static int[] neighbor_left = new int[size];
+
+        public static int PlacePM(float X, float Y)
+        {
+            for(int i = 0; i < size; i++)
+            {
+                if (active[i] == false)
+                {
+                    active[i] = true;
+                    posX[i] = X; posY[i] = Y;
+                    return i;
+                }
+            }
+            return size;
+        }
     }
 
 
