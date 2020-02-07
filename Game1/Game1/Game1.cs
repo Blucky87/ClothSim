@@ -10,15 +10,15 @@ namespace Game1
 {
     public static class Assets
     {   //simulation fields
-        public static float gravity = 9.8f;
+        public static float gravity = 5.0f;
         public static float vertletMulti = 0.5f;
         public static float friction = 0.98f;
         public static float massOfPoints = 0.7f;
         public static float stiffnesses = 0.9f;
-        public static byte relaxIterations = 4;
+        public static byte relaxIterations = 3;
 
         public static byte curtainWidth = 141;
-        public static byte curtainHeight = 27;
+        public static byte curtainHeight = 23;
         public static byte pinNthTopPointMass = 5;
         public static byte spacing = 8; //how far apart points are created
         public static float restingDistances = 7; 
@@ -61,22 +61,42 @@ namespace Game1
         public float X, Y;
         public float lastX, lastY;
         public float accX, accY = 0;
-        public float mass = Assets.massOfPoints;
         public bool pinned = false;
-        public List<PointMass> neighbors = new List<PointMass>(); //0=up, 1=right, 2=down, 3=left
-        //constructors
-        public PointMass(int xPos, int yPos)
-        {
-            X = xPos; Y = yPos;
-            //add 4 nulls for neighbors
-            neighbors.Add(null);
-            neighbors.Add(null);
-            neighbors.Add(null);
-            neighbors.Add(null);
-        }
+        public PointMass[] neighbors = new PointMass[4];
+        
+        public PointMass(int xPos, int yPos) { X = xPos; Y = yPos; }
     }
 
+    //migrating pointmass class to array structs in static pool instance
+
+    public static class PM_ArrayPool
+    {
+        public static int size = 4096;
+        public static bool[] active = new bool[size];
+        public static float[] posX = new float[size];
+        public static float[] posY = new float[size];
+        public static float[] accX = new float[size];
+        public static float[] accY = new float[size];
+        public static bool[] pinned = new bool[size];
+        //neighbor indices of pointMass
+        public static int[] neighbor_up = new int[size];
+        public static int[] neighbor_right = new int[size];
+        public static int[] neighbor_down = new int[size];
+        public static int[] neighbor_left = new int[size];
+    }
+
+
+
+
+
+
+
+
+
+
+
     public enum MouseButtons { LeftButton, RightButton }
+
     public static class InputData
     {
         public static KeyboardState currentKeyboardState = new KeyboardState();
@@ -127,10 +147,10 @@ namespace Game1
         }
 
         public static void RelaxPM(PointMass Pm)
-        {   //relaxIterations
+        {
             for (int x = 0; x < Assets.relaxIterations; x++)
             {
-                for (int g = 0; g < Pm.neighbors.Count; g++)
+                for (int g = 0; g < 4; g++)
                 {
                     if (Pm.neighbors[g] != null)
                     {
@@ -142,47 +162,45 @@ namespace Game1
                         //find the difference, or the ratio of how far along the restingDistance the actual distance is.
                         float difference = (Assets.restingDistances - d) / d;
 
-                        //inverse the mass quantities
-                        float im1 = 1 / Pm.mass;
-                        float im2 = 1 / Pm.neighbors[g].mass;
-                        float scalarP1 = (im1 / (im1 + im2)) * Assets.stiffnesses;
-                        float scalarP2 = Assets.stiffnesses - scalarP1;
+                        //define a coefficient that determines how attractive PMs are to each other
+                        float coef = 0.2f;
 
                         //push/pull based on mass
-                        //heavier objects will be pushed/pulled less than attached light objects
                         if (Pm.pinned == false)
                         {
-                            Pm.X += diffX * scalarP1 * difference;
-                            Pm.Y += diffY * scalarP1 * difference;
+                            Pm.X += diffX * difference * coef;
+                            Pm.Y += diffY * difference * coef;
                         }
                         if (Pm.neighbors[g].pinned == false)
                         {
-                            Pm.neighbors[g].X -= diffX * scalarP2 * difference;
-                            Pm.neighbors[g].Y -= diffY * scalarP2 * difference;
+                            Pm.neighbors[g].X -= diffX * difference * coef;
+                            Pm.neighbors[g].Y -= diffY * difference * coef;
                         }
                     }
                 }
             }
         }
 
-        public static double velocityX, velocityY;
-        public static float nextX, nextY;
-
         public static void ApplyPhysics(PointMass Pm)
         {
             if (Pm.pinned) { return; }
-            //apply force
-            Pm.accX += 0 / Pm.mass;
-            Pm.accY += Pm.mass * Assets.gravity;
+            float nextX, nextY;
+            float velocityX, velocityY;
+
             //calc velocity
             velocityX = Pm.X - Pm.lastX;
             velocityY = Pm.Y - Pm.lastY;
+            
             //dampen velocity
             velocityX *= Assets.friction;
             velocityY *= Assets.friction;
+            //clip velocity
+            if (Math.Abs(velocityX) < 0.04f) { velocityX = 0.0f; }
+            if (Math.Abs(velocityY) < 0.04f) { velocityY = 0.0f; }
+            
             //calculate the next position using Verlet Integration
-            nextX = (float)(Pm.X + velocityX + Assets.vertletMulti * Pm.accX);
-            nextY = (float)(Pm.Y + velocityY + Assets.vertletMulti * Pm.accY);
+            nextX = (Pm.X + velocityX + Assets.vertletMulti * Pm.accX);
+            nextY = (Pm.Y + velocityY + Assets.vertletMulti * (Pm.accY + Assets.massOfPoints * Assets.gravity));
             //reset variables
             Pm.lastX = Pm.X;
             Pm.lastY = Pm.Y;
@@ -245,7 +263,7 @@ namespace Game1
         //cursor rec hitbox
         public Rectangle cursorRec = new Rectangle(0, 0, 34, 34);
         List<PointMass> PointMasses;
-        PointMass grabbedPM;
+        //PointMass grabbedPM;
         List<Line> Lines;
         int i;
 
@@ -276,10 +294,10 @@ namespace Game1
 
 
             #region create the point masses
-
-            for (int y = 0; y < Assets.curtainHeight; y++)
+            
+            for (int x = 0; x < Assets.curtainWidth; x++)
             {
-                for (int x = 0; x < Assets.curtainWidth; x++)
+                for (int y = 0; y < Assets.curtainHeight; y++)
                 {   //spread pms out
                     PointMass pm = new PointMass(curPos.X + 64 + x * Assets.spacing, curPos.Y + y * Assets.spacing);
                     if (y == 0)
@@ -299,24 +317,29 @@ namespace Game1
             #region setup point masses neighbors
 
             counter = 0;
-            for (int y = 0; y < Assets.curtainHeight; y++)
+            //int x = 0; x < Assets.curtainWidth; x++
+            for (int x = 0; x < Assets.curtainWidth; x++)
             {
-                for (int x = 0; x < Assets.curtainWidth; x++)
+                for (int y = 0; y < Assets.curtainHeight; y++)
                 {
-                    if (x < (Assets.curtainWidth - 1)) //connect left to right point, and vice versa
-                    {   //neighbors ref ////0=up, 1=right, 2=down, 3=left
-                        PointMasses[counter].neighbors[1] = PointMasses[counter + 1];
-                        PointMasses[counter + 1].neighbors[3] = PointMasses[counter];
-                    }
+
                     if (y < (Assets.curtainHeight - 1)) //connect top to bottom, and vice versa
                     {
-                        PointMasses[counter].neighbors[2] = PointMasses[counter + Assets.curtainWidth];
-                        PointMasses[counter + Assets.curtainWidth].neighbors[0] = PointMasses[counter];
+                        PointMasses[counter].neighbors[2] = PointMasses[counter + 1];
+                        PointMasses[counter + 1].neighbors[0] = PointMasses[counter];
                     }
+                    if (x < (Assets.curtainWidth - 1)) //connect left to right point, and vice versa
+                    {   //neighbors ref ////0=up, 1=right, 2=down, 3=left
+                        PointMasses[counter].neighbors[1] = PointMasses[counter + Assets.curtainHeight];
+                        PointMasses[counter + Assets.curtainHeight].neighbors[3] = PointMasses[counter];
+                    }
+                    
                     //track which pm index we are at
                     counter++;
                 }
             }
+
+
 
             #endregion
 
@@ -324,14 +347,15 @@ namespace Game1
             #region assign point masses to lines
 
             counter = 0;
-            for (int y = 0; y < Assets.curtainHeight; y++)
+            for (int x = 0; x < Assets.curtainWidth; x++)
             {
-                for (int x = 0; x < Assets.curtainWidth; x++)
+                for (int y = 0; y < Assets.curtainHeight; y++)
                 {
                     if (x < (Assets.curtainWidth - 1)) //connect left to right point
-                    { Lines.Add(new Line(PointMasses[counter], PointMasses[counter + 1])); }
+                    { Lines.Add(new Line(PointMasses[counter], PointMasses[counter + Assets.curtainHeight])); }
                     if (y < (Assets.curtainHeight - 1)) //connect top to bottom
-                    { Lines.Add(new Line(PointMasses[counter], PointMasses[counter + Assets.curtainWidth])); }
+                    { Lines.Add(new Line(PointMasses[counter], PointMasses[counter + 1])); }
+                    
                     //track which pm index we are at
                     counter++;
                 }
@@ -371,6 +395,32 @@ namespace Game1
             cursorRec.X = (int)currentMouseState.X - (int)(cursorRec.Width / 2);
             cursorRec.Y = (int)currentMouseState.Y - (int)(cursorRec.Height / 2);
 
+
+            //push cloth around upon collision with mouse
+            for (i = 0; i < PointMasses.Count; i++)
+            {   //do not allow input to be passed to pinned point masses
+                if (cursorRec.Contains(PointMasses[i].X, PointMasses[i].Y))
+                {   
+                    if (PointMasses[i].X > currentMouseState.X)
+                    { PointMasses[i].accX += 20.0f; }
+                    else { PointMasses[i].accX -= 20.0f; }
+                    PointMasses[i].accY -= 20.0f;
+
+                    for (int g = 0; g < 4; g++)
+                    {
+                        if (PointMasses[i].neighbors[g] != null)
+                        {
+                            if (PointMasses[i].neighbors[g].X > currentMouseState.X)
+                            { PointMasses[i].neighbors[g].accX += 20.0f; }
+                            else { PointMasses[i].neighbors[g].accX -= 20.0f; }
+                            PointMasses[i].neighbors[g].accY -= 20.0f;
+                        }
+                    }
+                }
+            }
+
+
+            /*
             if (InputData.IsLeftMouseBtnPress())
             {   //grab one PM colliding with cursor rec
                 for (i = 0; i < PointMasses.Count; i++)
@@ -402,6 +452,7 @@ namespace Game1
                     grabbedPM = null;
                 }
             } 
+            */
 
             #endregion
 
@@ -412,6 +463,7 @@ namespace Game1
 
             Assets.updateTimer.Stop();
             updateTimeRec.Width = (int)(Assets.updateTimer.ElapsedTicks / 1000 * 8);
+            Debug.WriteLine("update ms: " + Assets.updateTimer.ElapsedMilliseconds);
         }
 
         protected override void Draw(GameTime gameTime)
